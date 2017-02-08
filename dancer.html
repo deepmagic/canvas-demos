@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <style>
+            html, body {background:#000;color:#fff;width:100%;height:100%;margin:0;overflow:hidden;}
+            canvas{display:block;background:transparent;}
+            #offlinecanvas{display:none;}
+            canvas{position:absolute;z-index:10;}
+            .dg.ac{ z-index:22 !important; }
+            #stats{position:absolute;top:0px;right:260px;z-index:22;}
+        </style>
+    </head>
+    
+    <body>            
+    </body>
+    
+    <script src="/js/stats.js"></script>
+    <script src="/js/dat.gui.min.js"></script>
+    <script src="/js/pxmute.js"></script>
+    
+<script>
+    
+    var stats, ctx, ctx2;
+    var px, video, vidvol = 1.0, fullscreen=false;
+    var odata, data;
+    var threshold = 200;
+    var blurfactor = 0.5;
+    var hue = 300, huespeed = 400, huestart = 0, huestop = 360;
+    var scanheight = 7, scanwidth = 0;
+    var points = [], bodylines = [];
+    var last = new Date().getTime(), lastframe;
+    var ani = true, webcam = false, detectEdge = false, normalizeColor = false, showbody = true, showMotion = false;
+    var pixelates = [], ptMax = 1000, ptVel = 4, ptSize = 4, ptTTL = 1, ptRect = false;
+    var lnMax = 0, lines = [], lnSpeed = 30, lnShrink = 4;
+    var vbMax = 1000; vibes = [];
+
+    function Profiler() {
+        this.last  = 0;
+        this.data  = [];
+        this.avg   = function(){if(this.data.length) return this.data.reduce(function(pv,cv){return pv+cv;})/this.data.length;}
+        this.start = function(){this.last=window.performance.now();}
+        this.stop  = function(){this.data.push(window.performance.now()-this.last);}
+        this.clear = function(){this.data=[];}
+    };
+    var profiler = new Profiler();
+
+    function scan(indata, t, sh, sw) {
+        var pts = [];
+        var h = ctx.canvas.height;
+        var w = ctx.canvas.width*4;
+        //cnt = 0;
+        for(var i = 0; i < h; i+=sh) {
+            for(var j = 0; j < w; j+=(4+sw)) {
+                
+                var ndx = i*w+j;
+
+                if(indata.data[ndx  ] > t ){ //&&
+                   //indata.data[ndx+1] > t &&
+                   //indata.data[ndx+2] > t ) {
+                    pts.push( [Math.floor(j/4), i] );
+                }
+            }
+        }
+        return pts;
+    }
+    function scanbody(indata, t) {
+        
+        var sline = true;
+        var h = ctx.canvas.height;
+        var w = ctx.canvas.width*4;
+        var body = [];
+        
+        for(var i = 0; i < h; i++) {
+            for(var j = 0; j < w; j+=4) {
+                
+                var ndx = i*w+j;
+                if(indata.data[ndx] > t) { //assuming b/w
+                    if(sline) { //start line
+                        body.push([ Math.floor(j/4), i ]);
+                        sline = false;
+                    }
+                } else {                
+                    if(!sline) { // found line end
+                        body.push([ Math.floor((j-4)/4), i]);
+                        sline = true;
+                    }
+                }
+            }
+        }
+        
+        if(body.length%2) { // FIXME: problem with algo
+            body.splice(body.length-1, 1);
+        }
+        
+        return body;
+    }
+    function lineate(p, t) {
+        for(var i = 0; i < lines.length;i+=2) {
+            lines[i  ][0] += lnSpeed*t;
+            lines[i+1][0] += lnSpeed*t;
+            
+            lines[i  ][0] += lnShrink*t;
+            lines[i+1][0] -= lnShrink*t;
+            if(lines[i+1][0] <= lines[i  ][0] ||
+               lines[i][0] > ctx.canvas.width) { 
+                lines.splice(i,2);
+            }
+        }
+        
+        if(lines.length>=lnMax) { return; }
+        
+        var sline = true, lastx = 0, row = 0;
+        for(var i = 0; i < p.length; i++) {
+            
+            if(sline) { //start line
+                lines.push([ p[i][0], p[i][1] ]);
+                lastx = p[i][0];
+                row   = p[i][1];
+                sline = false;
+            }
+            
+            if(p[i][0] > ++lastx || p[i][1] !== row) { // next point was > next pixel OR line ended
+                lines.push([ p[i-1][0], p[i-1][1] ]);  // so end line on prev point
+                sline = true;
+            }
+        }
+        
+        if(lines.length%2) { // FIXME: problem with algo
+            lines.splice(lines.length-1, 1);
+        }
+    }
+    function vibrate(bl, p, t) {
+        
+       // for(var i = 0; i < bl.length; i++) {
+       //     vibes.push( 
+       // }
+        //find points that lie on an edge
+        // 01 or 10
+        
+        //make lines by y value and offset point in row
+        
+    }
+    function pixelate(p, t) {
+        for(var i = 0; i < pixelates.length; i++) {
+            pixelates[i][0] += pixelates[i][2]; //Math.random()*4 - 2;
+            pixelates[i][4] -= t;
+            pixelates[i][7] = pixelates[i][4]/pixelates[i][5];
+            
+            if(pixelates[i][4] <= 0 || pixelates[i][0] < 0|| pixelates[i][0] > ctx2.canvas.width) {
+                pixelates.splice(i,1);
+            }
+        }
+        if(pixelates.length>=ptMax) { return; }
+        
+        var sum = 0;
+        for(var i = 0; i < p.length; i++) { sum += p[i][0]; }
+        var avg = sum/p.length;
+        //p.sort(function(a, b){ return a[0]-b[0]; });
+        //var median = p.length > 0 ? p[ Math.floor( (p.length-1)/2 ) ][0] : 0;
+        
+        for(var i = 0; i < p.length; i++) {
+            var ttl = Math.random()*ptTTL;
+            pixelates.push([
+                p[i][0], // 0:x
+                p[i][1], // 1:y
+                (p[i][0] > avg ? Math.random()*ptVel : Math.random()*-ptVel), // 2:xvel 
+                Math.random()*ptSize, // 3:size 
+                ttl, ttl, // 4:ttl, 5:sttl
+                hue, 1.0] // 6:color, 7:alpha
+            ); 
+            
+        }
+    }
+
+    function render() {
+        ctx2.fillStyle = 'rgba(0,0,0,'+blurfactor+')';
+        ctx2.fillRect(0, 0, ctx2.canvas.width, ctx2.canvas.height);
+      
+        for(var i = 0; i < pixelates.length;i++) {
+            ctx2.beginPath(); 
+            ctx2.fillStyle = "hsla("+pixelates[i][6]+",100%, 50%, "+pixelates[i][7]+")";
+            //ctx2.font = 5*pixelates[i][3]+"px Helvetica";
+            //ctx2.fillText((Math.random()>0.5?'1':'0'), pixelates[i][0], pixelates[i][1]);
+            if(ptRect)
+                ctx2.rect(pixelates[i][0], pixelates[i][1], pixelates[i][3], pixelates[i][3]);
+            else
+                ctx2.arc(pixelates[i][0], pixelates[i][1], pixelates[i][3], 0, Math.PI*2);
+                
+            ctx2.fill();
+        }
+        
+        ctx2.beginPath(); 
+        ctx2.strokeStyle = "hsla("+hue+",100%, 50%, 1.0)";
+        //ctx2.strokeStyle = "#fff";
+        for(var i = 0; i < lines.length;i+=2) {
+            ctx2.moveTo( lines[i  ][0], lines[i  ][1]);
+            ctx2.lineTo( lines[i+1][0], lines[i+1][1]);
+        }
+        ctx2.stroke();
+         
+        if(showbody) {
+            ctx2.beginPath(); 
+            ctx2.strokeStyle = "#fff";
+            for(var i = 0; i < bodylines.length;i+=2) {
+                ctx2.moveTo( bodylines[i  ][0], bodylines[i  ][1]);
+                ctx2.lineTo( bodylines[i+1][0], bodylines[i+1][1]);
+            }
+            ctx2.stroke();
+        }
+        
+        if(showMotion) {
+            ctx2.beginPath(); 
+            ctx2.fillStyle = "#0f0";
+            for(var i = 0; i < points.length;i++) {
+                ctx2.rect(points[i][0], points[i][1], 1, 1);
+            }
+            ctx2.fill();
+        }           
+        
+    }
+    function update(t) { //22.702
+
+        hue+=huespeed*t;
+        if(hue>huestop){hue=huestart;}
+        
+        if(ani){ ctx.drawImage(video, 0, 0, ctx.canvas.width, ctx.canvas.height); }     // avg : 1
+        //ctx.drawImage(img, 0, 0, ctx.canvas.width, ctx.canvas.height);
+        odata = ctx.getImageData(0, 0, ctx.canvas.width, ctx.canvas.height);            // avg : 8.250253724017695
+        
+        if(webcam || normalizeColor) {
+            data = px.normalize(odata);
+            //data = px.median(data);
+        } else {
+            data = px.threshold(odata, threshold);              // avg : 0.8645586540986752
+        }
+        
+        if(detectEdge){ data = px.sobel(data); }                // avg : 5.643474145068063
+        if(lastframe) { data = px.subtract(data, lastframe); }  // avg : 1.6421465088618384
+        lastframe = px.copy(odata);                             // avg : 1.1918791058053682
+        
+        if(showbody) { bodylines = scanbody(odata, 128); }
+        points = scan(data, threshold, scanheight, scanwidth);
+        
+        vibrate(bodylines, points, t);
+        lineate(points, t);    
+        pixelate(points, t);
+        
+        render();
+    }
+    function loop() {
+        var time = new Date().getTime();
+        var t = (time - last) / 1000.0;
+        t = t > 0.3 ? 0.3 : t; // clamp time
+        update(t);
+        last = time;
+        stats.update();
+        requestAnimFrame(loop);
+    }
+    function init() {
+        
+        var canvas = document.createElement( 'canvas' );
+        canvas.id = "offlinecanvas";
+        document.body.appendChild( canvas );
+        ctx = canvas.getContext('2d');
+        ctx.canvas.width = 512;
+        ctx.canvas.height = 256;
+        
+        var canvas2 = document.createElement( 'canvas' );
+        canvas2.id = "onlinecanvas";
+        document.body.appendChild( canvas2 );
+        ctx2 = canvas2.getContext('2d');
+        ctx2.canvas.width = ctx.canvas.width;
+        ctx2.canvas.height = ctx.canvas.height;
+        
+        px = new PxMute(ctx);
+        
+        canvas2.addEventListener('dragover', function(evt){evt.stopPropagation();evt.preventDefault();evt.dataTransfer.dropEffect='copy';});
+        canvas2.addEventListener('drop', function(evt){evt.stopPropagation();evt.preventDefault();video.src=window.URL.createObjectURL(evt.dataTransfer.files[0]); });
+        
+        //so electric
+        //https://www.youtube.com/watch?v=G22X5X49VhM
+        //shadow dance
+        //https://www.youtube.com/watch?v=vavkMjRHcCE
+        video = document.createElement( 'video' );
+        video.loop = true;
+        video.volume = vidvol;
+        video.autoplay = true;
+        video.src = "media/final.ogv";
+        //video.src = "sound/ocean.mp4";
+        //video.src = "sound/soelectric.mp4";
+        
+        /*
+        img = new Image();
+        img.src = "media/sobeltest.png";
+        this.img.onload = function() {
+            ctx.drawImage(img, 0, 0, ctx.canvas.width, ctx.canvas.height);
+            loop();
+        };
+        */
+        
+        stats = new Stats();
+        stats.setMode(0); 
+        document.body.appendChild( stats.domElement );
+        
+        var camstream = 0, gui = new dat.GUI();
+        gui.add(window,"webcam").onChange(function(val) {
+             if(val) {
+                 window.URL = window.URL || window.webkitURL;
+                 navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia || navigator.mozGetUserMedia || navigator.msGetUserMedia;
+                 navigator.getUserMedia({video: true}, function(stream) {
+                    
+                    showbody=false;
+                    detectEdge=false;
+                    threshold = 64;
+                    
+                    video.width = 512;
+                    video.height = 256;
+                    video.autoplay = true;
+                    video.src = window.URL.createObjectURL(stream);
+                    video.play();
+                    
+                    document.getElementById("offlinecanvas").style.display="block";
+                    document.getElementById("onlinecanvas").style.opacity="0.9";
+                    camstream = stream;
+                    
+                 }, function(error) {
+                    console.log('Unable to capture WebCam. Please reload the page.');
+                 });
+             } else {
+                 if(camstream)camstream.stop();
+                 threshold = 200;
+                 video.src =  "sound/final.ogv";
+                 document.getElementById("onlinecanvas").style.opacity="1.0";
+                 document.getElementById("offlinecanvas").style.display="none";
+             }
+        });
+        
+        var vc = gui.addFolder("Video Controls");
+        vc.add(video, "volume",0, 1);
+        vc.add(video, "playbackRate", 0.1, 1.0).step(0.1);
+        vc.add(video, "currentTime", 0).listen();
+        vc.add(window, "normalizeColor");
+        vc.add(window, "fullscreen").onChange(function(val) {
+            var canvas = document.getElementById("onlinecanvas");
+            var canvas2 = document.getElementById("offlinecanvas");
+            if(val) {
+                canvas2.style.width = 
+                canvas2.style.height = 
+                canvas.style.width = 
+                canvas.style.height = "100%";
+            } else {
+                canvas2.style.width = 
+                canvas2.style.height = 
+                canvas.style.width = 
+                canvas.style.height = "";
+            }
+        });
+        
+        var gc = gui.addFolder("Global Controls");
+        gc.add(window, "detectEdge").listen();
+        gc.add(window, "threshold",1, 254).listen();
+        gc.add(window, "scanheight",1, 20).step(1);
+        //gc.add(window, "scanwidth",0, 32).step(4);
+        gc.add(window, "blurfactor",0.01, 1).step(0.01);
+        gc.add(window, "showbody").listen();
+        gc.add(window, "showMotion");
+        gc.open();
+        
+        var cc = gui.addFolder("Color Controls");
+        cc.add(window, "hue",0, 360);
+        cc.add(window, "huespeed",0, 600);
+        cc.add(window, "huestart",0, 360);
+        cc.add(window, "huestop",0, 360);
+        
+        var lf = gui.addFolder("Line Effect");
+        lf.add(window, "lnMax",0, 10000).step(1);
+        lf.add(window, "lnSpeed",1, 125).step(1);
+        lf.add(window, "lnShrink",1, 100).step(1);
+        
+        var pf = gui.addFolder("Point Effect");
+        pf.add(window, "ptMax",  0, 10000).step(1);
+        pf.add(window, "ptVel",  1, 15).step(1);
+        pf.add(window, "ptSize", 1, 10).step(1);
+        pf.add(window, "ptTTL",  0.1, 5).step(0.1);
+        pf.add(window, "ptRect");
+        
+        loop();
+    }
+    window.addEventListener('load', onLoad, false);
+    function onLoad(evt) {
+        //window.onresize = resize;
+        
+        window.addEventListener("keyup", function(evt) {
+            if(evt.keyCode === 0x20){// space
+                ani=!ani;
+                if(ani){ 
+                    video.play(); 
+                } else { 
+                    video.pause(); 
+                }
+            }
+        });
+        
+        init();
+    }
+
+    window.requestAnimFrame = (function(){
+      return window.requestAnimationFrame       ||
+             window.webkitRequestAnimationFrame ||
+             window.mozRequestAnimationFrame    ||
+             function( callback ){
+                window.setTimeout(callback, 1000 / 60);
+             };
+    })();
+       
+</script>
+
+</html>

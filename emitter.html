@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <style>
+            *{background:#000;}
+            html, body, canvas{width:100%;height:100%;overflow:hidden;}
+            #stats{position:absolute;top:0;}
+        </style>
+    </head>
+    
+    <body>
+        <canvas></canvas>
+    </body>
+<script src="/js/stats.js"></script>
+<script src="/js/dat.gui.min.js"></script>
+
+<script>
+    var stats;
+    var numpts = 100;
+    var speed = 0.03;
+    var spin = 3;
+    var space = 10;
+    var ctx, blurf=0.3,
+    blur=false, 
+    gravity=9.8, 
+    color=320, 
+    ttl=5, 
+    bounce=0.7, 
+    pt, pt1, pt2, 
+    z = 125, 
+    dist = 1000, points = [], mouse=false, ry=0;
+    var xvel = 25, yvel = 50, zvel = 25, lastx, lasty;
+    var last = new Date().getTime();
+    
+    var plane = new Quad(0,25,0,40,40);
+    function Quad(cx, cy, cz, l, w) {
+        this.cx = cx || 0;
+        this.cy = cy || 0;
+        this.cz = cz || 0;
+        this.length = l || 1;
+        this.width = w || 1;
+        this.color = "#fff";
+        this.verts = [
+            new Point(cx+w/2, cy, cz+l/2),
+            new Point(cx-w/2, cy, cz+l/2),
+            new Point(cx-w/2, cy, cz-l/2),
+            new Point(cx+w/2, cy, cz-l/2),
+        ];
+    }
+    Quad.prototype.draw = function() {
+        ctx.strokeStyle = "#fff";//ctx.fillStyle = "#333";
+        ctx.beginPath(); 
+        for(var i = 0; i < plane.verts.length;i++) {
+            pt1 = process( plane.verts[i] );
+            ctx.lineTo(pt1.x, pt1.y);
+        } 
+        
+        ctx.closePath();
+        ctx.stroke();
+        //ctx.fill();
+    };
+    function Point(x,y,z,scale, color, alpha, vel) {
+        this.x = x || 1;
+        this.y = y || 0;
+        this.z = z || 1.001;
+        this.scale = scale || 1;
+        this.alpha = alpha || 1.0;
+        this.color = color || "#fff";
+        this.vel = vel || [0,0,0];
+        this.ttl = Math.random()*ttl + 1;
+        this.sttl = this.ttl;
+    }
+    
+    function render() {
+        if(!blur) {
+            ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+        } else {
+            ctx.fillStyle = 'rgba(0,0,0,'+blurf+')';
+            ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+        }
+
+        plane.draw();
+        
+        for(var i = 0; i < points.length;i++) {
+            pt = process(points[i]);
+            drawCircle(pt.x, pt.y, points[i].scale*pt.scale, 1, points[i].color);
+        }
+        
+        stats.update();
+        animate();
+        requestAnimFrame(render);
+    }
+    function animate(time) {
+        var time = new Date().getTime();
+        var t = (time - last) / 1000;
+        for(var i = 0; i < points.length;i++) {
+            
+            points[i].ttl -= t;
+            points[i].x += points[i].vel[0] * t;
+            points[i].y += points[i].vel[1] * t;
+            points[i].z += points[i].vel[2] * t;
+            points[i].scale = (points[i].ttl/points[i].sttl);
+            points[i].vel[1] += gravity;
+            points[i].color = "hsla("+(color+(points[i].ttl/points[i].sttl)*30)+",100%, "+(points[i].ttl/points[i].sttl)*100+"%, "+points[i].alpha+")";
+            
+            if(points[i].ttl < 0) {
+                points.splice(i,1);
+                points.push( createpoint() );
+            }
+            
+            if((points[i].y-points[i].scale/2) >= plane.cy) {
+                points[i].vel[1] = -points[i].vel[1] * bounce + gravity*1.25; // + grav, keeps them from bouncing forever
+                points[i].y = plane.cy+(points[i].scale/2);
+            }
+        }
+        
+        last = time;
+    }
+    function drawCircle(x, y, r, w, color) {
+        ctx.fillStyle = color;
+		ctx.lineWidth = w;
+		ctx.beginPath(); 
+        ctx.arc(x, y, (r>0?r:0), 0, Math.PI*2);
+        ctx.fill();
+	}
+    function drawLine(sx,sy, x, y, color) {
+		ctx.strokeStyle = color;
+		ctx.beginPath(); 
+        ctx.moveTo(sx,sy); 
+        ctx.lineTo(x, y);
+		ctx.stroke();
+	}
+    
+    function process(pt) {
+        var p = rotate(pt);
+        return project(p);
+    }
+    function rotate(pt) {
+        var p = sCopy(pt);
+        p.x = (pt.x)*Math.cos(ry)-(pt.z)*Math.sin(ry);
+        p.z = (pt.x)*Math.sin(ry)+(pt.z)*Math.cos(ry) + z;
+        p.scale = pt.scale;
+        return p;
+    }
+    function project(pt) {
+        var p = sCopy(pt);
+        p.x = ctx.canvas.width/2  + (pt.x * (dist/pt.z));
+        p.y = ctx.canvas.height/2 + (pt.y * (dist/pt.z));
+        p.scale = (dist/pt.z);
+        return p;
+	}
+    
+    function init() {
+        points = [];
+        for(var i = 0; i < numpts;i++){ 
+            points.push( createpoint() ); 
+            points[i].ttl = 0;
+        }
+    }
+    function createpoint() {
+        return new Point(
+                Math.random()*2-1,
+                Math.random()*2-1,
+                Math.random()*2-1,
+                undefined, //Math.random()+0.1, 
+                "#f0f",
+                1,
+                [Math.random()*xvel-xvel/2, Math.random()*-yvel, Math.random()*zvel-zvel/2]
+            );
+    }
+    function sCopy(obj) {
+        var o = {};
+        for(var a in obj) {
+            if(obj.hasOwnProperty(a)){ o[a] = obj[a]; }
+        }
+        return o;
+    }
+    
+    window.addEventListener('load', onLoad, false);
+    function onLoad(evt) {
+        
+        var canvas = document.querySelector('canvas');
+        ctx = canvas.getContext("2d");
+        window.onresize = function () {
+		    ctx.canvas.height = document.body.offsetHeight;
+		    ctx.canvas.width = document.body.offsetWidth;
+		};
+        window.onresize();
+        
+        canvas.addEventListener('mousedown', function(evt) { mouse = true; 
+            lastx=((evt.layerX||evt.offsetX||evt.clientX) - ctx.canvas.width/2)/ctx.canvas.width * Math.PI*2;; 
+            lasty=(-evt.layerY||evt.offsetY||evt.clientY); 
+        });
+        canvas.addEventListener('mouseup', function(evt) { mouse = false;  });
+        canvas.addEventListener('mousemove', function(evt) {
+            if(!mouse)return;
+            
+            var ex = ( evt.layerX||evt.offsetX||evt.clientX);
+            var ey = (-evt.layerY||evt.offsetY||evt.clientY);
+            
+            var r = ((ex - ctx.canvas.width/2)/ctx.canvas.width) * Math.PI*2;
+            ry += r - lastx;
+            lastx = r;
+            
+            z += ey - lasty;
+            if(z > 1000) {z = 1000; }
+            if(z < 30) {z = 30; }
+            lasty = ey;
+        });
+        
+        init();
+        render();
+    }
+    
+var gui = new dat.GUI();
+var c  = gui.add(window, "numpts",1, 2000);
+gui.add(window, "bounce", 0.1, 0.8);
+gui.add(window, "color", 0, 360);
+gui.add(window, "ttl", 0, 40);
+gui.add(window, "gravity", 0.1, 30);
+gui.add(window, "xvel", 1, 100);
+gui.add(window, "yvel", 1, 100);
+gui.add(window, "zvel", 1, 100);
+gui.add(window, "blurf", 0.1, 0.9);
+gui.add(window, "blur", false, true);
+
+var to;
+c.onChange(function(value) {
+    clearTimeout(to);
+    to = setTimeout(init, 500);
+});
+stats = new Stats();
+stats.setMode(0); 
+document.body.appendChild( stats.domElement );
+
+window.requestAnimFrame = (function(){
+  return window.requestAnimationFrame       ||
+         window.webkitRequestAnimationFrame ||
+         window.mozRequestAnimationFrame    ||
+         function( callback ){
+            window.setTimeout(callback, 1000 / 60);
+         };
+})();
+		
+    </script>
+    
+</html>
+

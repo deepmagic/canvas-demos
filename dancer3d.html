@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <style>
+            html, body, canvas{color:#fff;background:#000;margin:0;overflow:hidden;}
+            .dg.ac{ z-index:22 !important; }
+            #stats{position:absolute;top:0px;right:260px;z-index:22;}
+        </style>
+    </head>
+    
+    <body>            
+    </body>
+    
+    <script src="/js/dat.gui.min.js"></script>
+    <script src="/js/stats.js"></script>
+    
+    <script src="js/three.js/build/three.js"></script>
+    
+    <script src="js/three.js/examples/js/shaders/CopyShader.js"></script>
+
+    <script src="js/three.js/examples/js/shaders/EdgeShader2.js"></script>
+    <script src="js/three.js/examples/js/shaders/HorizontalBlurShader.js"></script>
+
+    <script src="js/three.js/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="js/three.js/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="js/three.js/examples/js/postprocessing/MaskPass.js"></script>
+    <script src="js/three.js/examples/js/postprocessing/ShaderPass.js"></script>
+
+<script>
+THREE.ColorifyShader = {
+	uniforms: {
+		"tDiffuse": { type: "t", value: null },
+		"color":    { type: "c", value: new THREE.Color( 0xffffff ) }
+	},
+
+	vertexShader: [
+		"varying vec2 vUv;",
+		"void main() {",
+			"vUv = uv;",
+			"gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );",
+
+		"}"
+	].join("\n"),
+
+	fragmentShader: [
+		"uniform vec3 color;",
+		"uniform sampler2D tDiffuse;",
+		"varying vec2 vUv;",
+		"void main() {",
+			"vec4 texel = texture2D( tDiffuse, vUv );",
+			"vec3 luma = vec3( 0.299, 0.587, 0.114 );",
+			"float v = dot( texel.xyz, luma );",
+			"gl_FragColor = vec4( v * color, texel.w );",
+		"}"
+	].join("\n")
+};
+
+</script>    
+<script id="generic-vs" type="shader">
+    varying vec2 vUv;
+    void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+    }
+</script>
+<script id="myshader-fs" type="shader">
+        uniform vec3 color;
+		uniform sampler2D tDiffuse;
+		varying vec2 vUv;
+		void main() {
+			vec4 texel = texture2D( tDiffuse, vUv );
+			vec3 luma = vec3( 0.299, 0.587, 0.114 );
+			float v = dot( texel.xyz, luma );
+			gl_FragColor = vec4( v * color, texel.w );
+		}
+</script>
+<script>
+THREE.MyShader = {
+	uniforms: {
+		"tDiffuse": { type: "t", value: null },
+		"color":    { type: "c", value: new THREE.Color( 0xff00ff ) }
+	},
+	vertexShader: document.getElementById("generic-vs").innerHTML,
+	fragmentShader: document.getElementById("myshader-fs").innerHTML
+};
+</script> 
+    
+<script>
+    
+    var camera, scene, renderer, composer, audio, video, texture, efH, efV, effect;
+    var geometry, material, mesh, mesh2, audioctx;
+    var ani = true, stats;
+    var colorfy = 0xFF00FF;
+    var blur = 300;
+    var edgeSize = 1024;
+    var vidvol = 1;
+    
+    function render() {
+        
+        composer.render();
+        //renderer.render( scene, camera );
+    }
+    function update(t) {
+        if(!ani) return;
+        
+        if ( video.readyState === video.HAVE_ENOUGH_DATA ) {
+            if ( texture ) texture.needsUpdate = true;
+        }
+        
+        //sphere.rotation.y += 0.01;
+        
+         //efV.uniforms.color.value = new THREE.Color( acolor );
+        //acolor += 1;
+        stats.update();
+    }
+    
+    var last = new Date().getTime();
+    function loop() {
+        requestAnimFrame(loop);
+
+        render();
+        
+        var time = new Date().getTime();
+        var t = (time - last) / 1000.0;
+        t = t > 0.3 ? 0.3 : t; // clamp time
+        update(t);
+        last = time;
+    }
+    function resize() {
+        if(camera) {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(  window.innerWidth,  window.innerHeight );
+        } 
+    }
+    function setscene(scene) {
+        
+        video = document.createElement( 'video' );
+        video.loop = true;
+        video.volume = vidvol;
+        video.src = "media/final.ogv";
+        
+        
+      /*
+        audioctx = new webkitAudioContext();
+        analyser = audioctx.createAnalyser();
+        analyser.smoothingTimeConstant = 0.5;
+        analyser.fftSize = 1024/4;
+        fdata = new Uint8Array(analyser.frequencyBinCount);
+        tdata = new Uint8Array(analyser.frequencyBinCount);
+        lines = [];
+        numLines = 10;
+        //node
+        jsnode = audioctx.createJavaScriptNode(2048/4, 1, 1);
+        jsnode.onaudioprocess = function() {
+            analyser.getByteFrequencyData(fdata);
+            analyser.getByteTimeDomainData(tdata);
+            
+            lines.push( Array.prototype.slice.call(fdata, 0) );
+            lines=lines.slice(-numLines);
+        }
+    
+    
+        lowpass = audioctx.createBiquadFilter();
+        source = audioctx.createMediaElementSource(video);
+        source.connect(lowpass);
+        //lowpass.connect(analyser);
+            
+        lowpass.connect(audioctx.destination);
+        //jsnode.connect(audioctx.destination);
+    */
+        video.play();
+        
+        texture = new THREE.Texture( video );
+        //texture.minFilter = THREE.LinearFilter;
+        //texture.magFilter = THREE.LinearFilter;
+        material = new THREE.MeshBasicMaterial({map: texture, transparent:true });
+        
+         var material2 = new THREE.MeshBasicMaterial({ 
+            color: 0x0000FF, 
+            wireframe: true,
+            wireframeLinewidth: 2
+        });
+        
+        //var geo = new THREE.SphereGeometry( 400,10,10);
+        //sphere = new THREE.Mesh(geo, material2);
+        //scene.add( sphere);
+        //sphere.position.z = 0;
+        
+        geometry = new THREE.PlaneGeometry( window.innerWidth, window.innerHeight,1, 1);
+        plane = new THREE.Mesh( geometry, material );
+        scene.add( plane );
+        plane.position.z = -420.0;
+    }
+    function init() {
+        renderer = new THREE.WebGLRenderer({ clearColor: 0x000000, clearAlpha: 0, antialias:true });
+        
+        renderer.setSize( window.innerWidth, window.innerHeight );
+        document.body.appendChild( renderer.domElement );
+        
+        scene = new THREE.Scene();
+        setscene( scene );
+
+        camera = new THREE.PerspectiveCamera(45, document.body.offsetWidth / document.body.offsetHeight, 1, 10000 );
+        camera.position.z = 500;
+        
+        composer = new THREE.EffectComposer( renderer );
+        composer.addPass( new THREE.RenderPass( scene, camera ) );
+
+        efH = new THREE.ShaderPass( THREE.EdgeShader2 );
+        efH.uniforms.aspect.value = new THREE.Vector2(edgeSize, edgeSize);
+        efV = new THREE.ShaderPass( THREE.HorizontalBlurShader );
+        efV.uniforms.h.value = 1/blur;
+        //efV = new THREE.ShaderPass( THREE.VeriBlurShader );
+        effect = new THREE.ShaderPass( THREE.MyShader );
+        effect.uniforms.color.value = new THREE.Color( colorfy );
+        //efH.renderToScreen = true;
+        //efV.renderToScreen = true;
+        effect.renderToScreen = true;
+        
+        composer.addPass( efH );
+        composer.addPass( efV );
+        composer.addPass( effect );
+        
+        stats = new Stats();
+        stats.setMode(0); 
+        document.body.appendChild( stats.domElement );
+   
+        
+        loop();
+    }
+    window.addEventListener('load', onLoad, false);
+    function onLoad(evt) {
+        window.onresize = resize;
+        
+        window.addEventListener("keyup", function(evt) {
+            if(evt.keyCode===0x20){
+                ani=!ani;
+                if(ani){ 
+                    video.play(); 
+                } else { 
+                    video.pause(); 
+                }
+            }
+        });
+        
+        init();
+    }
+
+
+//////////////////////////////////////////////////////////////////////////////
+
+
+var gui = new dat.GUI();
+gui.add(window, "blur",5, 500).onChange(function(value) {
+    efV.uniforms.h.value = 1/value;
+});
+gui.add(window, "edgeSize",100, 4096).onChange(function(value) {
+    efH.uniforms.aspect.value = new THREE.Vector2(value, value);
+});
+gui.add(window, "vidvol",0, 1).onChange(function(value) {
+    video.volume = value;
+});
+gui.addColor(window, "colorfy").onChange(function(value) {
+    effect.uniforms.color.value = new THREE.Color( value );
+});
+
+
+    window.requestAnimFrame = (function(){
+      return window.requestAnimationFrame       ||
+             window.webkitRequestAnimationFrame ||
+             window.mozRequestAnimationFrame    ||
+             function( callback ){
+                window.setTimeout(callback, 1000 / 60);
+             };
+    })();
+       
+</script>
+
+</html>
